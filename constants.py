@@ -1,0 +1,1 @@
+DATA_DIR = '/media/cxy/Others/env'
