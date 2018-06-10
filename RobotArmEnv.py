@@ -1,110 +1,124 @@
 # -*- coding:utf-8 -*-
+#!/usr/bin/python
 
 import numpy as np
 import os
+import cv2
+import json
+
 import gym
 from gym import error, spaces
-from gym import utils
 from gym.utils import seeding
+from constants import DATA_DIR, ID_TO_NUM, TIME_PENALTY_COEF, \
+    VISIBILITY_REWARD_SCALE, HALT_STEP, HALT_VISIBILITY
 
-try:
-    import atari_py
-except ImportError as e:
-    raise error.DependencyNotInstalled("{}. (HINT: you can install Atari dependencies by running 'pip install gym[atari]'.)".format(e))
-
-
-
-def to_ram(ale):
-    ram_size = ale.getRAMSize()
-    ram = np.zeros((ram_size),dtype=np.uint8)
-    ale.getRAM(ram)
-    return ram
-
-class RobotArmEnv(gym.Env, utils.EzPickle):
-    metadata = {'render.modes': ['human', 'rgb_array']}
-
-    def __init__(self, game='pong', obs_type='ram', frameskip=(2, 5), repeat_action_probability=0.):
-        """Frameskip should be either a tuple (indicating a random range to
-        choose from, with the top value exclude), or an int."""
-
-        utils.EzPickle.__init__(self, game, obs_type)
-        assert obs_type in ('ram', 'image')
-
-        self.game_path = atari_py.get_game_path(game)
-        if not os.path.exists(self.game_path):
-            raise IOError('You asked for game %s but path %s does not exist'%(game, self.game_path))
-        self._obs_type = obs_type
-        self.frameskip = frameskip
-        self.ale = atari_py.ALEInterface()
+class RobotArmEnv(gym.Env):
+    def __init__(self):
         self.viewer = None
 
-        # Tune (or disable) ALE's action repeat:
-        # https://github.com/openai/gym/issues/349
-        assert isinstance(repeat_action_probability, (float, int)), "Invalid repeat_action_probability: {!r}".format(repeat_action_probability)
-        self.ale.setFloat('repeat_action_probability'.encode('utf-8'), repeat_action_probability)
+        [self.base, self.offset, self.latitude, self.longitude] = self.seed()
 
-        self.seed()
-
-        self._action_set = self.ale.getMinimalActionSet()
+        self._action_set = [[10,1], [10,-1], [-10,-1], [-10,1]]
         self.action_space = spaces.Discrete(len(self._action_set))
 
-        (screen_width,screen_height) = self.ale.getScreenDims()
-        if self._obs_type == 'ram':
-            self.observation_space = spaces.Box(low=0, high=255, dtype=np.uint8, shape=(128,))
-        elif self._obs_type == 'image':
-            self.observation_space = spaces.Box(low=0, high=255, shape=(screen_height, screen_width, 3), dtype=np.uint8)
-        else:
-            raise error.Error('Unrecognized observation type: {}'.format(self._obs_type))
+        # RGB (480, 640, 3)
+        # Depth (480, 640, 1)
+        (screen_width,screen_height) = (480, 640)
 
-    def seed(self, seed=None):
-        self.np_random, seed1 = seeding.np_random(seed)
-        # Derive a random seed. This gets passed as a uint, but gets
-        # checked as an int elsewhere, so we need to keep it below
-        # 2**31.
-        seed2 = seeding.hash_seed(seed1 + 1) % 2**31
-        # Empirically, we need to seed before loading the ROM.
-        self.ale.setInt(b'random_seed', seed2)
-        self.ale.loadROM(self.game_path)
-        return [seed1, seed2]
+        self.observation_space = spaces.Box(low=0, high=255, shape=(screen_height, screen_width, 3))
+        self.num_steps = 0
+        self.done = False
+        self.visibility = 0
+        self.reward = 0.0
+
+    def seed(self):
+        # TODO: range of `base` remain to be changed if the dataset is changed
+        base = np.random.randint(low=0, high=1)
+        offset = np.random.randint(low=0, high=8)
+
+        latitude = np.random.choice(a=[30,40,50,60,70])
+        longitude = np.random.choice(a=36)
+
+        return [base, offset, latitude, longitude]
 
     def step(self, a):
-        reward = 0.0
+        self.num_steps += 1
+        previous_visibility = self.visibility
         action = self._action_set[a]
 
-        if isinstance(self.frameskip, int):
-            num_steps = self.frameskip
-        else:
-            num_steps = self.np_random.randint(self.frameskip[0], self.frameskip[1])
-        for _ in range(num_steps):
-            reward += self.ale.act(action)
+        self.latitude = np.clip(action[0] + self.latitude, 30, 70)
+        self.longitude = np.clip(action[1] + self.longitude, 0, 35)
+        with open(DATA_DIR+'/visibility.json', 'r') as f:
+            self.visibility = json.load(f)[ID_TO_NUM[self.base]]
+        self.reward = self._get_reward(previous_visibility)
         ob = self._get_obs()
+        if self.num_steps >= HALT_STEP or self.visibility >= HALT_VISIBILITY:
+            self.done = True
+        info = "TODO"
 
-        return ob, reward, self.ale.game_over(), {"ale.lives": self.ale.lives()}
+        return ob, self.reward, self.done, info
 
-    def _get_image(self):
-        return self.ale.getScreenRGB2()
+    def _get_rgb_image(self):
+        rgb_image = cv2.imread(DATA_DIR+"/{0:04d}/RGB/{1}_RGB_{2}.jpg"
+                               .format(self.base*8+self.offset, self.latitude, self.longitude))
+        return rgb_image
 
-    def _get_ram(self):
-        return to_ram(self.ale)
+    def _get_depth_image(self):
+        depth_image = np.load(DATA_DIR+"/{0:04d}/depth/{1}_depth_{2}.npy"
+                               .format(self.base*8+self.offset, self.latitude, self.longitude))
+        return depth_image
+
+    def _get_target_image(self):
+        target_image = cv2.imread(DATA_DIR+"/{0:04d}/RGB/{1}_RGB_{2}.jpg"
+                               .format(self.base*8, self.latitude, self.longitude))
+        target_image = target_image[target_image.shape[0]//2-100:target_image.shape[0]//2+100,
+                       target_image.shape[1]//2-100:target_image.shape[1]//2+100,
+                       :]
+        return target_image
+
+    def _get_reward(self, previous_visibility):
+        visibility_reward = (self.visibility - previous_visibility) * VISIBILITY_REWARD_SCALE
+        final_reward = visibility_reward - TIME_PENALTY_COEF
+        return final_reward
+
+    # def _round_action_lon(self, action_value):
+    #     action_value = np.floor(action_value * 35)
+    #     return np.floor(action_value)
+    #
+    # def _round_action_lat(self, action_value):
+    #     action_value = np.floor(action_value * 20)
+    #     if -5 <= action_value <= 5:
+    #         action_value = 0
+    #     elif 5 < action_value <= 15:
+    #         action_value = 10
+    #     elif -15 <= action_value < -5:
+    #         action_value = -10
+    #     elif 15 < action_value <= 20:
+    #         action_value = 20
+    #     else:
+    #         action_value = -20
+    #     return action_value
 
     @property
     def _n_actions(self):
         return len(self._action_set)
 
     def _get_obs(self):
-        if self._obs_type == 'ram':
-            return self._get_ram()
-        elif self._obs_type == 'image':
-            img = self._get_image()
-        return img
+        img_tuple = [self._get_rgb_image(),
+                     self._get_depth_image(),
+                     self._get_target_image()]
+        return img_tuple
 
-    # return: (states, observations)
     def reset(self):
-        self.ale.reset_game()
+        self.num_steps = 0
+        self.done = False
+        self.visibility = 0
+        self.reward = 0.0
+        [self.base, self.offset, self.latitude, self.longitude] = self.seed()
         return self._get_obs()
 
     def render(self, mode='human'):
-        img = self._get_image()
+        img = self._get_rgb_image()
         if mode == 'rgb_array':
             return img
         elif mode == 'human':
@@ -198,12 +212,14 @@ ACTION_MEANING = {
 if __name__ == '__main__' :
     env = RobotArmEnv()
     env.reset()
+    '''
     # Level 1: Getting environment up and running
     for _ in range(1000): # run for 1000 steps
         # env.render()
-        action = env.action_space.sampe() # pick a random action
+        action = env.action_space.sample() # pick a random action
         env.step(action) # take action
     '''
+
     # Level 2: Running trials(AKA episodes)
     for i_episode in range(20):
         observation = env.reset()  # reset for each new trial
@@ -214,7 +230,7 @@ if __name__ == '__main__' :
             if done:
                 print("Episode finished after {} timesteps".format(t + 1))
                 break
-    '''
+
     '''
     # Level 3: Non-random actions
     highscore = 0
