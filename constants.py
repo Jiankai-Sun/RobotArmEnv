@@ -5,7 +5,7 @@
 # DATA_DIR = '/media/cxy/Others/env'
 # Ubuntu
 DATA_DIR = '/media/jack/资料/MVIG/20500'
-ID_TO_NUM = {0:'yellow_cube',
+ID_TO_NAME = {0:'yellow_cube',
        1:'stapler',
        2:'orange',
        3:'red_tape',

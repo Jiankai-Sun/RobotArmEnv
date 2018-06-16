@@ -9,20 +9,21 @@ import json
 import gym
 from gym import error, spaces
 from gym.utils import seeding
-from constants import DATA_DIR, ID_TO_NUM, TIME_PENALTY_COEF, \
+from constants import DATA_DIR, ID_TO_NAME, TIME_PENALTY_COEF, \
     VISIBILITY_REWARD_SCALE, HALT_STEP, HALT_VISIBILITY
 
 class RobotArmEnv(gym.Env):
-    def __init__(self):
-        self.viewer = None
-
+    def __init__(self, mode='discrete'):
+        self.mode = mode
         [self.base, self.offset, self.latitude, self.longitude] = self.seed()
+        if mode == 'discrete':
+            self._action_set = [[10,1], [10,-1], [-10,-1], [-10,1]]
+            self.action_space = spaces.Discrete(len(self._action_set))
+        elif mode == 'continuous':
+            self._action_set = [[10],[1]]
+            self.action_space = spaces.Discrete(len(self._action_set))
 
-        self._action_set = [[10,1], [10,-1], [-10,-1], [-10,1]]
-        self.action_space = spaces.Discrete(len(self._action_set))
-
-        # RGB (480, 640, 3)
-        # Depth (480, 640, 1)
+        # RGB (480, 640, 3)  Depth (480, 640, 1)
         (screen_width,screen_height) = (480, 640)
 
         self.observation_space = spaces.Box(low=0, high=255, shape=(screen_height, screen_width, 3))
@@ -30,6 +31,7 @@ class RobotArmEnv(gym.Env):
         self.done = False
         self.visibility = 0
         self.reward = 0.0
+        self.viewer = None
 
     def seed(self):
         # TODO: range of `base` remain to be changed if the dataset is changed
