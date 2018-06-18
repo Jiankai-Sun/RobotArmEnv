@@ -46,12 +46,17 @@ class RobotArmEnv(gym.Env):
     def step(self, a):
         self.num_steps += 1
         previous_visibility = self.visibility
-        action = self._action_set[a]
+        if self.mode == 'discrete':
+            action = self._action_set[a]
 
-        self.latitude = np.clip(action[0] + self.latitude, 30, 70)
-        self.longitude = np.clip(action[1] + self.longitude, 0, 35)
+            self.latitude = np.clip(action[0] + self.latitude, 30, 70)
+            self.longitude = np.clip(action[1] + self.longitude, 0, 35)
+        elif self.mode == 'continuous':
+            self.latitude = np.clip(self._round_action_lat(a[0]) + self.latitude, 30, 70)
+            self.longitude = np.clip(self._round_action_lon(a[1]) + self.longitude, 0, 35)
+
         with open(DATA_DIR+'/visibility.json', 'r') as f:
-            self.visibility = json.load(f)[ID_TO_NUM[self.base]]
+            self.visibility = json.load(f)[ID_TO_NAME[self.base]]
         self.reward = self._get_reward(previous_visibility)
         ob = self._get_obs()
         if self.num_steps >= HALT_STEP or self.visibility >= HALT_VISIBILITY:
@@ -83,23 +88,15 @@ class RobotArmEnv(gym.Env):
         final_reward = visibility_reward - TIME_PENALTY_COEF
         return final_reward
 
-    # def _round_action_lon(self, action_value):
-    #     action_value = np.floor(action_value * 35)
-    #     return np.floor(action_value)
-    #
-    # def _round_action_lat(self, action_value):
-    #     action_value = np.floor(action_value * 20)
-    #     if -5 <= action_value <= 5:
-    #         action_value = 0
-    #     elif 5 < action_value <= 15:
-    #         action_value = 10
-    #     elif -15 <= action_value < -5:
-    #         action_value = -10
-    #     elif 15 < action_value <= 20:
-    #         action_value = 20
-    #     else:
-    #         action_value = -20
-    #     return action_value
+    def _round_action_lon(self, action_value):
+        action_value = np.floor(action_value * 35)
+        latitude_shift = round(action_value)
+        return latitude_shift
+
+    def _round_action_lat(self, action_value):
+        action_value = np.floor(action_value * 20)
+        action_value = round(action_value / 10) * 10
+        return action_value
 
     @property
     def _n_actions(self):
