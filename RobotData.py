@@ -27,9 +27,9 @@ class RobotDataset(Dataset):
         self.depth_list = []
         for sub in sub_folder:
             rgb_sub_foler = os.path.join(sub, 'RGB')
-            self.rgb_list.extend([os.path.join(rgb_sub_foler, img_file) for img_file in sorted(os.listdir(rgb_sub_foler))])
+            self.rgb_list.extend([os.path.join(rgb_sub_foler, img_file) for img_file in sorted(os.listdir(rgb_sub_foler)) if img_file.split('.')[-1] == 'jpg'])
             depth_sub_foler = os.path.join(sub, 'depth')
-            self.depth_list.extend([os.path.join(depth_sub_foler, depth_file) for depth_file in sorted(os.listdir(depth_sub_foler))])
+            self.depth_list.extend([os.path.join(depth_sub_foler, depth_file) for depth_file in sorted(os.listdir(depth_sub_foler)) if depth_file.split('.')[-1] == 'npy'])
         print('Number of RGB images: ', len(self.rgb_list))
         print('Number of Depth images: ', len(self.depth_list))
 
@@ -70,5 +70,5 @@ if __name__ == "__main__":
     for i, (rgb_img, depth) in enumerate(RobotDataset_loader):
         plt.imshow(rgb_img[0].permute(1, 2, 0))
         plt.show()
-        plt.imshow(depth)
+        plt.imshow(depth[0])
         plt.show()
