@@ -33,9 +33,8 @@ class RobotDataset(Dataset):
         print('Number of RGB images: ', len(self.rgb_list))
         print('Number of Depth images: ', len(self.depth_list))
 
-        # assert len(self.rgb_list) == len(self.depth_list), 'RGB != Depth'
-        # self.data_len = len(self.rgb_list)
-        self.data_len = min(len(self.depth_list), len(self.rgb_list))
+        assert len(self.rgb_list) == len(self.depth_list), 'RGB != Depth'
+        self.data_len = len(self.rgb_list)
 
     def __getitem__(self, index):
         rgb_name = self.rgb_list[index]
